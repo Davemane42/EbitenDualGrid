@@ -27,6 +27,7 @@ var (
 		color.RGBA{115, 62, 57, 255},   // Brown
 		color.RGBA{38, 92, 66, 255},    // Dark Green
 		color.RGBA{62, 137, 72, 255},   // Green
+		color.RGBA{254, 174, 52, 255},  // Orange
 	}
 
 	worldWidth  int
@@ -170,6 +171,10 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
+	grassTilemap, _, err := ebitenutil.NewImageFromFile("assets/grassTilemap.png")
+	if err != nil {
+		log.Fatal(err)
+	}
 	softMask, _, err := ebitenutil.NewImageFromFile("assets/softMask.png")
 	if err != nil {
 		log.Fatal(err)
@@ -197,10 +202,27 @@ func main() {
 	}
 
 	newDualGrid := dualgrid.NewDualGrid(16, 16, tileSize, 3)
-	newDualGrid.AddMaterial(materials[0], rockMask)  // Rock
-	newDualGrid.AddMaterial(materials[1], rockMask)  // Dirt
-	newDualGrid.AddMaterial(materials[2], grassMask) // DarkGrass
-	newDualGrid.AddMaterial(materials[3], softMask)  // Grass
+
+	err = newDualGrid.AddMaterialFromMask(materials[0], rockMask)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = newDualGrid.AddMaterialFromMask(materials[1], rockMask)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = newDualGrid.AddMaterialFromMask(materials[2], grassMask)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = newDualGrid.AddMaterialFromMask(materials[3], softMask)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = newDualGrid.AddMaterialFromTilemap(grassTilemap)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	game := &Game{
 		DualGrid: newDualGrid,

@@ -3,22 +3,30 @@ package dualgrid
 import (
 	"errors"
 	"image"
-	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-type TileType uint8
+type (
+	TileType uint8
+	Material [16]*ebiten.Image
+	DualGrid struct {
+		Materials             []Material
+		DefaultMaterial       TileType
+		TileSize              int
+		WorldGrid             Grid
+		GridWidth, GridHeight int
+	}
+)
 
-type Material [16]*ebiten.Image
+var (
+	TilemapDimensionError = errors.New("Tilemap Image isnt the right dimension")
+	TextureDimensionError = errors.New("Texture Image isnt the right dimension")
+	MaskDimensionError    = errors.New("Mask isnt the right dimension")
 
-type DualGrid struct {
-	Materials             []Material
-	DefaultMaterial       TileType
-	TileSize              int
-	WorldGrid             Grid
-	GridWidth, GridHeight int
-}
+	// reorder tiles for bitmap indexing (different order from what i found online, dont remember why)
+	tileOrder = []int{2, 5, 11, 3, 9, 7, 15, 14, 4, 12, 13, 10, 0, 1, 6, 8}
+)
 
 func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid {
 	return DualGrid{
@@ -31,15 +39,34 @@ func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid
 	}
 }
 
-func (g *DualGrid) AddMaterial(material, mask *ebiten.Image) {
-	if material.Bounds().Dx() != g.TileSize || material.Bounds().Dy() != g.TileSize {
-		log.Fatal(errors.New("Material isnt the right dimension"))
-	}
-	if mask.Bounds().Dx() != 4*g.TileSize || mask.Bounds().Dy() != 4*g.TileSize {
-		log.Fatal(errors.New("Mask isnt the right dimension"))
+// Take a 4x4 tilemap, reorder in into a Material and add it to the Dualgrid
+func (g *DualGrid) AddMaterialFromTilemap(tilemapImage *ebiten.Image) error {
+
+	if tilemapImage.Bounds().Dx() != 4*g.TileSize || tilemapImage.Bounds().Dy() != 4*g.TileSize {
+		return TilemapDimensionError
 	}
 
-	opts := &ebiten.DrawImageOptions{}
+	// reorder for bitmask indexing
+	newMaterial := Material{}
+	for i := range 16 {
+		x := (i % 4) * g.TileSize
+		y := (i / 4) * g.TileSize
+
+		newMaterial[tileOrder[i]] = ebiten.NewImageFromImage(tilemapImage.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image))
+	}
+	g.Materials = append(g.Materials, newMaterial)
+	return nil
+}
+
+// Take a base texture, a 4x4 mask and add the Material to the Dualgrid
+func (g *DualGrid) AddMaterialFromMask(textureImage, maskImage *ebiten.Image) error {
+	if textureImage.Bounds().Dx() != g.TileSize || textureImage.Bounds().Dy() != g.TileSize {
+		return TextureDimensionError
+	}
+	if maskImage.Bounds().Dx() != 4*g.TileSize || maskImage.Bounds().Dy() != 4*g.TileSize {
+		return MaskDimensionError
+	}
+
 	multiplyOpts := &ebiten.DrawImageOptions{
 		Blend: ebiten.Blend{
 			BlendFactorSourceRGB:        ebiten.BlendFactorZero,
@@ -51,33 +78,28 @@ func (g *DualGrid) AddMaterial(material, mask *ebiten.Image) {
 		},
 	}
 
-	// reorder tiles for bitmap indexing (different order from what i found online, dont remember why)
-	order := []int{2, 5, 11, 3, 9, 7, 15, 14, 4, 12, 13, 10, 0, 1, 6, 8}
-
-	// for each tile you grab the base material, multiply by the right mask and store in the right order
-	newMaterial := Material{}
-	tempImage := ebiten.NewImage(g.TileSize, g.TileSize)
+	// grab the base material, multiply by the mask to "stamp out" the shape
+	tempImage := ebiten.NewImage(4*g.TileSize, 4*g.TileSize)
 	for i := range 16 {
 		x := (i % 4) * g.TileSize
 		y := (i / 4) * g.TileSize
 
-		finalImage := ebiten.NewImage(g.TileSize, g.TileSize)
-
-		tempImage.DrawImage(material, opts)
-		tempImage.DrawImage(mask.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image), multiplyOpts)
-
-		finalImage.DrawImage(tempImage, opts)
-
-		newMaterial[order[i]] = finalImage
+		opts := &ebiten.DrawImageOptions{}
+		opts.GeoM.Translate(float64(x), float64(y))
+		tempImage.DrawImage(textureImage, opts)
 	}
-	g.Materials = append(g.Materials, newMaterial)
+	tempImage.DrawImage(maskImage, multiplyOpts)
+
+	return g.AddMaterialFromTilemap(tempImage)
 }
 
+// Really need to be refactored for partial render (camera)
 func (g DualGrid) DrawTo(img *ebiten.Image) {
 	var xPos, yPos float64
 	var tl, tr, bl, br TileType
 	var matType TileType
 	var matTypeMask = make([]bool, len(g.Materials))
+	var bitmask int
 	for x := range g.GridWidth + 1 {
 		xPos = float64(x * g.TileSize)
 		for y := range g.GridHeight + 1 {
@@ -119,7 +141,7 @@ func (g DualGrid) DrawTo(img *ebiten.Image) {
 					continue
 				}
 				matType = TileType(i)
-				bitmask := 0b0000
+				bitmask = 0b0000
 				if tl == matType || tl > matType {
 					bitmask |= 1 << 3
 				}

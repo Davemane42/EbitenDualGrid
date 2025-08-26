@@ -39,6 +39,10 @@ func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid
 	}
 }
 
+func (g DualGrid) IsInbound(x, y int) bool {
+	return x >= 0 && y >= 0 && x < g.GridWidth && y < g.GridHeight
+}
+
 // Take a 4x4 tilemap, reorder in into a Material and add it to the Dualgrid
 func (g *DualGrid) AddMaterialFromTilemap(tilemapImage *ebiten.Image) error {
 
@@ -94,16 +98,32 @@ func (g *DualGrid) AddMaterialFromMask(textureImage, maskImage *ebiten.Image) er
 }
 
 // Really need to be refactored for partial render (camera)
-func (g DualGrid) DrawTo(img *ebiten.Image) {
-	var xPos, yPos float64
+func (g DualGrid) DrawTo(img *ebiten.Image, left, top int) {
+	img.Clear()
+
+	var widthInTile int = img.Bounds().Dx() / g.TileSize
+	var heightInTile int = img.Bounds().Dy() / g.TileSize
+	var tileStartX int = left / g.TileSize
+	var tileStartY int = top / g.TileSize
+	var offsetX float64 = float64(left % g.TileSize)
+	var offsetY float64 = float64(top % g.TileSize)
+
+	var tileX, tileY int
 	var tl, tr, bl, br TileType
 	var matType TileType
 	var matTypeMask = make([]bool, len(g.Materials))
 	var bitmask int
-	for x := range g.GridWidth + 1 {
-		xPos = float64(x * g.TileSize)
-		for y := range g.GridHeight + 1 {
-			yPos = float64(y * g.TileSize)
+
+	for x := range widthInTile {
+		tileX = tileStartX + x
+		if tileX < 0 || tileX >= g.GridWidth+1 {
+			continue
+		}
+		for y := range heightInTile {
+			tileY = tileStartY + y
+			if tileY < 0 || tileY >= g.GridHeight+1 {
+				continue
+			}
 
 			tl = g.DefaultMaterial
 			tr = g.DefaultMaterial
@@ -111,17 +131,17 @@ func (g DualGrid) DrawTo(img *ebiten.Image) {
 			br = g.DefaultMaterial
 
 			// If inbound set corners to grid value
-			if x >= 1 && y >= 1 {
-				tl = g.WorldGrid[x-1][y-1]
+			if tileX >= 1 && tileY >= 1 {
+				tl = g.WorldGrid[tileX-1][tileY-1]
 			}
-			if x < g.GridWidth && y >= 1 {
-				tr = g.WorldGrid[x][y-1]
+			if tileX < g.GridWidth && tileY >= 1 {
+				tr = g.WorldGrid[tileX][tileY-1]
 			}
-			if x >= 1 && y < g.GridHeight {
-				bl = g.WorldGrid[x-1][y]
+			if tileX >= 1 && tileY < g.GridHeight {
+				bl = g.WorldGrid[tileX-1][tileY]
 			}
-			if x < g.GridWidth && y < g.GridHeight {
-				br = g.WorldGrid[x][y]
+			if tileX < g.GridWidth && tileY < g.GridHeight {
+				br = g.WorldGrid[tileX][tileY]
 			}
 
 			// reset mask
@@ -156,9 +176,8 @@ func (g DualGrid) DrawTo(img *ebiten.Image) {
 				}
 
 				opts := &ebiten.DrawImageOptions{}
-				opts.GeoM.Translate(xPos, yPos)
+				opts.GeoM.Translate(float64(x*g.TileSize)-offsetX, float64(y*g.TileSize)-offsetY)
 				img.DrawImage(g.Materials[matType][bitmask], opts)
-
 			}
 		}
 	}

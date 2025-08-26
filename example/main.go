@@ -32,6 +32,10 @@ var (
 
 	worldWidth  int
 	worldHeight int
+	cursorX     int
+	cursorY     int
+	cameraX     int
+	cameraY     int
 )
 
 type Game struct {
@@ -40,14 +44,29 @@ type Game struct {
 
 func (g *Game) Update() error {
 	mx, my := ebiten.CursorPosition()
-	MouseWorldX := max(0, min((mx-int(g.DualGrid.TileSize/2))/g.DualGrid.TileSize, g.DualGrid.GridWidth-1))
-	MouseWorldY := max(0, min((my-int(g.DualGrid.TileSize/2))/g.DualGrid.TileSize, g.DualGrid.GridHeight-1))
+	MouseWorldX := (mx + cameraX - int(g.DualGrid.TileSize/2)) / g.DualGrid.TileSize
+	MouseWorldY := (my + cameraY - int(g.DualGrid.TileSize/2)) / g.DualGrid.TileSize
 
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	// Pan
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonMiddle) {
+		cursorX, cursorY = ebiten.CursorPosition()
+	}
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
+		newCursorX, newCursorY := ebiten.CursorPosition()
+		if newCursorX != cursorX || newCursorY != cursorY {
+			cameraX -= newCursorX - cursorX
+			cameraY -= newCursorY - cursorY
+			cursorX, cursorY = newCursorX, newCursorY
+			updateDualGridImage = true
+		}
+	}
+
+	// Place and destroy Material
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.DualGrid.IsInbound(MouseWorldX, MouseWorldY) {
 		g.DualGrid.WorldGrid[MouseWorldX][MouseWorldY] = dualgrid.TileType(selectedMaterial)
 		updateDualGridImage = true
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) && g.DualGrid.IsInbound(MouseWorldX, MouseWorldY) {
 		g.DualGrid.WorldGrid[MouseWorldX][MouseWorldY] = g.DualGrid.DefaultMaterial
 		updateDualGridImage = true
 	}
@@ -57,6 +76,7 @@ func (g *Game) Update() error {
 		updateDualGridImage = true
 	}
 
+	// Select Material
 	if _, y := ebiten.Wheel(); y != 0 {
 		if y > 0 {
 			selectedMaterial = (selectedMaterial + 1) % len(g.DualGrid.Materials)
@@ -70,7 +90,7 @@ func (g *Game) Update() error {
 
 	if updateDualGridImage {
 		updateDualGridImage = false
-		g.DualGrid.DrawTo(dualGridImage)
+		g.DualGrid.DrawTo(dualGridImage, cameraX, cameraY)
 	}
 
 	// Debug stuff
@@ -105,7 +125,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				if showGrid && x < g.DualGrid.GridWidth && y < g.DualGrid.GridHeight {
 					vector.StrokeRect(
 						screen,
-						float32(xPos+1), float32(yPos+1),
+						float32(xPos+1-cameraX), float32(yPos+1-cameraY),
 						float32(g.DualGrid.TileSize-1), float32(g.DualGrid.TileSize-1),
 						1,
 						materialsColors[g.DualGrid.WorldGrid[x][y]],
@@ -132,10 +152,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 						br = g.DualGrid.WorldGrid[x][y]
 					}
 
-					vector.DrawFilledCircle(screen, float32(xPos-cornerOffset), float32(yPos-cornerOffset), 1, materialsColors[tl], false)
-					vector.DrawFilledCircle(screen, float32(xPos+cornerOffset), float32(yPos-cornerOffset), 1, materialsColors[tr], false)
-					vector.DrawFilledCircle(screen, float32(xPos-cornerOffset), float32(yPos+cornerOffset), 1, materialsColors[bl], false)
-					vector.DrawFilledCircle(screen, float32(xPos+cornerOffset), float32(yPos+cornerOffset), 1, materialsColors[br], false)
+					vector.DrawFilledCircle(screen, float32(xPos-cornerOffset-cameraX), float32(yPos-cornerOffset-cameraY), 1, materialsColors[tl], false)
+					vector.DrawFilledCircle(screen, float32(xPos+cornerOffset-cameraX), float32(yPos-cornerOffset-cameraY), 1, materialsColors[tr], false)
+					vector.DrawFilledCircle(screen, float32(xPos-cornerOffset-cameraX), float32(yPos+cornerOffset-cameraY), 1, materialsColors[bl], false)
+					vector.DrawFilledCircle(screen, float32(xPos+cornerOffset-cameraX), float32(yPos+cornerOffset-cameraY), 1, materialsColors[br], false)
 				}
 			}
 		}
@@ -228,21 +248,26 @@ func main() {
 		DualGrid: newDualGrid,
 	}
 
-	worldWidth = (newDualGrid.GridWidth + 1) * newDualGrid.TileSize
-	worldHeight = (newDualGrid.GridHeight + 1) * newDualGrid.TileSize
+	worldWidth = 30 * newDualGrid.TileSize
+	worldHeight = 20 * newDualGrid.TileSize
+
+	// Center Camera on grid center
+	cameraX = -(worldWidth - ((newDualGrid.GridWidth + 1) * newDualGrid.TileSize)) / 2
+	cameraY = -(worldHeight - ((newDualGrid.GridHeight + 1) * newDualGrid.TileSize)) / 2
 
 	dualGridImage = ebiten.NewImage(worldWidth, worldHeight)
 
 	fmt.Print("EbitenDualGrid Info:\n",
 		"  MouseWheel scrolls trough available materials\n",
 		"  Left/Right Click Destroy and place the selected material\n",
+		"  Middle mouse to pan around\n",
 		"  \"R\" reset the grid with the selected material as the default\n",
 		"  \"G\" Display the grid\n",
 		"  \"C\" Display the grid true values\n",
 		"  \"M\" Display the computed materials\n",
 	)
 
-	ebiten.SetWindowSize(worldWidth*3, worldHeight*3)
+	ebiten.SetWindowSize(worldWidth*2, worldHeight*2)
 	ebiten.SetWindowTitle("DualGrid")
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)

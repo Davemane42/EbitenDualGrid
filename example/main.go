@@ -168,12 +168,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		var xPos, yPos int
 		for y, mat := range g.DualGrid.Materials {
 			yPos = g.DualGrid.TileSize*y + y + 1
-			for x, img := range mat {
+			for x := range mat.TileCount {
 				xPos = g.DualGrid.TileSize*x + x
 				opts := &ebiten.DrawImageOptions{}
 				opts.GeoM.Translate(float64(xPos), float64(yPos))
 				vector.DrawFilledRect(screen, float32(xPos), float32(yPos), float32(g.DualGrid.TileSize), float32(g.DualGrid.TileSize), color.Black, false)
-				screen.DrawImage(img, opts)
+				screen.DrawImage(mat.Texture.SubImage(image.Rect(x*g.DualGrid.TileSize, 0, x*g.DualGrid.TileSize+g.DualGrid.TileSize, g.DualGrid.TileSize)).(*ebiten.Image), opts)
 			}
 		}
 	}
@@ -183,7 +183,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	vector.StrokeRect(screen, 1, float32(yPos), float32(g.DualGrid.TileSize)+1, float32(g.DualGrid.TileSize)+1, 1, materialsColors[selectedMaterial], false)
 	opts := &ebiten.DrawImageOptions{}
 	opts.GeoM.Translate(1, float64(yPos))
-	screen.DrawImage(g.DualGrid.Materials[selectedMaterial][15], opts)
+	screen.DrawImage(g.DualGrid.Materials[selectedMaterial].Texture.SubImage(image.Rect(15*g.DualGrid.TileSize, 0, 15*g.DualGrid.TileSize+g.DualGrid.TileSize, g.DualGrid.TileSize)).(*ebiten.Image), opts)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -223,23 +223,32 @@ func main() {
 
 	newDualGrid := dualgrid.NewDualGrid(16, 16, tileSize, 3)
 
-	err = newDualGrid.AddMaterialFromMask(materials[0], rockMask)
+	err = newDualGrid.AddMaterialFromMask(materials[0], rockMask, dualgrid.VarientMap{})
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = newDualGrid.AddMaterialFromMask(materials[1], rockMask)
+	err = newDualGrid.AddMaterialFromMask(materials[1], rockMask, dualgrid.VarientMap{})
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = newDualGrid.AddMaterialFromMask(materials[2], grassMask)
+	err = newDualGrid.AddMaterialFromMask(
+		materials[2],
+		grassMask,
+		dualgrid.VarientMap{
+			3:  {17},
+			5:  {16},
+			10: {19},
+			12: {18},
+		},
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = newDualGrid.AddMaterialFromMask(materials[3], softMask)
+	err = newDualGrid.AddMaterialFromMask(materials[3], softMask, dualgrid.VarientMap{})
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = newDualGrid.AddMaterialFromTilemap(grassTilemap)
+	err = newDualGrid.AddMaterialFromTilemap(grassTilemap, dualgrid.VarientMap{})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -211,6 +211,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// stairsSprite, _, err := ebitenutil.NewImageFromFile("assets/stairs.png")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 	tileSize := 16
 
 	// Seperate materialTypes.png into a slice of individual texture
@@ -252,6 +256,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// err = newDualGrid.AddMaterialFromTilemap(stairsSprite, dualgrid.VarientMap{})
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	game := &Game{
 		DualGrid: newDualGrid,

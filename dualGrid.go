@@ -3,8 +3,6 @@ package dualgrid
 import (
 	"errors"
 	"image"
-	"math"
-	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -12,8 +10,7 @@ import (
 type (
 	TileType   uint8
 	VarientMap map[int][]int
-	//Material [16]*ebiten.Image
-	Material struct {
+	Material   struct {
 		Texture    *ebiten.Image
 		TileSize   int
 		VarientMap map[int][]int
@@ -76,17 +73,19 @@ func (g *DualGrid) AddMaterialFromTilemap(tilemapImage *ebiten.Image, varientMap
 	newMaterial.VarientMap = VarientMap{}
 
 	// reorder for bitmask indexing
+	var opts ebiten.DrawImageOptions
 	for i := range 16 {
 		x := (i % 4) * g.TileSize
 		y := (i / 4) * g.TileSize
 
-		opts := &ebiten.DrawImageOptions{}
+		opts.GeoM.Reset()
 		opts.GeoM.Translate(float64(tileOrder[i]*g.TileSize), 0)
 
-		newMaterial.Texture.DrawImage(tilemapImage.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image), opts)
+		newMaterial.Texture.DrawImage(tilemapImage.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image), &opts)
 	}
 	var i = 16
 	for k, varient := range varientMap {
+		// store the "default" tile as the first varient
 		newMaterial.VarientMap[k] = append(newMaterial.VarientMap[k], k)
 
 		for _, varientIndex := range varient {
@@ -95,14 +94,15 @@ func (g *DualGrid) AddMaterialFromTilemap(tilemapImage *ebiten.Image, varientMap
 			x := (varientIndex % 4) * g.TileSize
 			y := (varientIndex / 4) * g.TileSize
 
-			opts := &ebiten.DrawImageOptions{}
+			opts.GeoM.Reset()
 			opts.GeoM.Translate(float64(i*g.TileSize), 0)
 
-			newMaterial.Texture.DrawImage(tilemapImage.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image), opts)
+			newMaterial.Texture.DrawImage(tilemapImage.SubImage(image.Rect(x, y, x+g.TileSize, y+g.TileSize)).(*ebiten.Image), &opts)
 
 			i++
 		}
 	}
+
 	g.Materials = append(g.Materials, newMaterial)
 	return nil
 }
@@ -130,41 +130,49 @@ func (g *DualGrid) AddMaterialFromMask(textureImage, maskImage *ebiten.Image, va
 		},
 	}
 
-	var maskTileHeight = int(math.Ceil(float64(maskImage.Bounds().Dy() / g.TileSize)))
+	var maskTileHeight = maskImage.Bounds().Dy() / g.TileSize
 
 	// grab the base material, multiply by the mask to "stamp out" the shape
 	tempImage := ebiten.NewImage(maskImage.Bounds().Dx(), maskImage.Bounds().Dy())
+	var stampOpts ebiten.DrawImageOptions
 	for i := range maskTileHeight * 4 {
 		x := (i % 4) * g.TileSize
 		y := (i / 4) * g.TileSize
 
-		opts := &ebiten.DrawImageOptions{}
-		opts.GeoM.Translate(float64(x), float64(y))
-		tempImage.DrawImage(textureImage, opts)
+		stampOpts.GeoM.Reset()
+		stampOpts.GeoM.Translate(float64(x), float64(y))
+		tempImage.DrawImage(textureImage, &stampOpts)
 	}
 	tempImage.DrawImage(maskImage, multiplyOpts)
 
 	return g.AddMaterialFromTilemap(tempImage, varientMap)
 }
 
-// Really need to be refactored for partial render (camera)
 func (g DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 	img.Clear()
 
-	var widthInTile int = img.Bounds().Dx() / g.TileSize
-	var heightInTile int = img.Bounds().Dy() / g.TileSize
-	var tileStartX int = left / g.TileSize
-	var tileStartY int = top / g.TileSize
-	var offsetX float64 = float64(left % g.TileSize)
-	var offsetY float64 = float64(top % g.TileSize)
+	widthInTile := img.Bounds().Dx() / g.TileSize
+	heightInTile := img.Bounds().Dy() / g.TileSize
+	tileStartX := left / g.TileSize
+	tileStartY := top / g.TileSize
+	offsetX := float32(left % g.TileSize)
+	offsetY := float32(top % g.TileSize)
+	ts := float32(g.TileSize)
 
 	var tileX, tileY int
 	var tl, tr, bl, br TileType
 	var matType TileType
-	var matTypeMask = make([]bool, len(g.Materials))
+	var matTypeMask [256]bool // TileType is uint8 so max 256 values, no heap alloc per call
 	var bitmask int
 
-	var random = rand.New(rand.NewSource(0))
+	// One vertex/index buffer slice per material
+	capacity := widthInTile * heightInTile
+	vertices := make([][]ebiten.Vertex, len(g.Materials))
+	indices := make([][]uint16, len(g.Materials))
+	for i := range g.Materials {
+		vertices[i] = make([]ebiten.Vertex, 0, capacity*4)
+		indices[i] = make([]uint16, 0, capacity*6)
+	}
 
 	for x := range widthInTile {
 		tileX = tileStartX + x
@@ -172,7 +180,6 @@ func (g DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 			continue
 		}
 		for y := range heightInTile {
-			random.Seed(int64(x * y))
 			tileY = tileStartY + y
 			if tileY < 0 || tileY >= g.GridHeight+1 {
 				continue
@@ -197,20 +204,17 @@ func (g DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 				br = g.WorldGrid[tileX][tileY]
 			}
 
-			// reset mask
-			for i := range matTypeMask {
-				matTypeMask[i] = false
-			}
-
 			matTypeMask[tl] = true
 			matTypeMask[tr] = true
 			matTypeMask[bl] = true
 			matTypeMask[br] = true
 
-			// draw up to 4 images per tile for better layering
-			matType = 0
+			dstX := float32(x)*ts - offsetX
+			dstY := float32(y)*ts - offsetY
+
+			// Draw up to 4 layers per tile for "layering"
 			for i := range len(g.Materials) {
-				if matTypeMask[i] == false {
+				if !matTypeMask[i] {
 					continue
 				}
 				matType = TileType(i)
@@ -228,14 +232,42 @@ func (g DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 					bitmask |= 1 << 0
 				}
 
+				// pick a varient using a world-space coords deterministic hash
 				if v, ok := g.Materials[matType].VarientMap[bitmask]; ok {
-					bitmask = v[random.Intn(len(v))]
+					tileHash := uint32(tileX)*7919 + uint32(tileY)*6151
+					bitmask = v[tileHash%uint32(len(v))]
 				}
 
-				opts := &ebiten.DrawImageOptions{}
-				opts.GeoM.Translate(float64(x*g.TileSize)-offsetX, float64(y*g.TileSize)-offsetY)
-				img.DrawImage(g.Materials[matType].Texture.SubImage(image.Rect(bitmask*g.TileSize, 0, bitmask*g.TileSize+g.TileSize, g.TileSize)).(*ebiten.Image), opts)
+				srcX := float32(bitmask) * ts
+				base := uint16(len(vertices[i]))
+
+				// TL, TR, BL, BR
+				vertices[i] = append(vertices[i],
+					ebiten.Vertex{DstX: dstX, DstY: dstY, SrcX: srcX, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+					ebiten.Vertex{DstX: dstX + ts, DstY: dstY, SrcX: srcX + ts, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+					ebiten.Vertex{DstX: dstX, DstY: dstY + ts, SrcX: srcX, SrcY: ts, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+					ebiten.Vertex{DstX: dstX + ts, DstY: dstY + ts, SrcX: srcX + ts, SrcY: ts, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
+				)
+				indices[i] = append(indices[i],
+					base, base+1, base+2,
+					base+1, base+3, base+2,
+				)
 			}
+
+			// Reset only the entries that were changed
+			matTypeMask[tl] = false
+			matTypeMask[tr] = false
+			matTypeMask[bl] = false
+			matTypeMask[br] = false
 		}
+	}
+
+	// One draw call per material
+	var drawOpts ebiten.DrawTrianglesOptions
+	for i, mat := range g.Materials {
+		if len(vertices[i]) == 0 {
+			continue
+		}
+		img.DrawTriangles(vertices[i], indices[i], mat.Texture, &drawOpts)
 	}
 }

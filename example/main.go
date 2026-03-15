@@ -5,12 +5,21 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"os"
 
 	dualgrid "github.com/davemane42/EbitenDualGrid"
+	assets "github.com/davemane42/EbitenDualGrid/example/assets"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+)
+
+type Mode int
+
+const (
+	ModeDungeon Mode = iota
+	ModeNature
 )
 
 var (
@@ -18,28 +27,112 @@ var (
 	showGrid     bool
 	showTextures bool
 
-	updateDualGridImage bool = true
+	updateDualGridImage = true
 	dualGridImage       *ebiten.Image
 
 	selectedMaterial int
-	materialsColors  = []color.Color{
+	materialsColors  []color.Color
+
+	cursorX int
+	cursorY int
+	cameraX int
+	cameraY int
+
+	tileSize    = 16
+	worldWidth  = 30 * tileSize
+	worldHeight = 20 * tileSize
+
+	currentMode     Mode
+	currentModeName string
+)
+
+type Game struct {
+	DualGrid dualgrid.DualGrid
+}
+
+func setupDungeonMode() dualgrid.DualGrid {
+	dg := dualgrid.NewDualGrid(16, 16, tileSize, 2)
+	dg.WorldGrid.FillRect(4, 4, 8, 8, 0)  // main room
+	dg.WorldGrid.FillRect(4, 4, 8, 1, 1)  // main room wall
+	dg.WorldGrid.FillRect(6, 2, 4, 12, 0) // vertical corridor
+	dg.WorldGrid.FillRect(6, 2, 4, 1, 1)  // vertical corridor wall
+	dg.WorldGrid.FillRect(2, 6, 12, 4, 0) // horizontal corridor
+	dg.WorldGrid.FillRect(2, 6, 2, 1, 1)  // horizontal corridor left wall
+	dg.WorldGrid.FillRect(12, 6, 2, 1, 1) // horizontal corridor right wall
+
+	if err := dg.AddMaterialFromTilemap(assets.Images["floor"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromTilemap(assets.Images["wall"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromTilemap(assets.Images["topWall"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+
+	materialsColors = []color.Color{
+		color.RGBA{255, 255, 255, 255}, // White
+		color.RGBA{139, 155, 180, 255}, // Gray
+		color.RGBA{254, 174, 52, 255},  // Orange
+	}
+	currentModeName = "Dungeon"
+	return dg
+}
+
+func setupNatureMode() dualgrid.DualGrid {
+	mats := []*ebiten.Image{}
+	for i := range assets.Images["materialTypes"].Bounds().Dx() / tileSize {
+		mats = append(mats, assets.Images["materialTypes"].SubImage(image.Rect(i*tileSize, 0, i*tileSize+tileSize, tileSize)).(*ebiten.Image))
+	}
+
+	dg := dualgrid.NewDualGrid(16, 16, tileSize, 3)
+
+	if err := dg.AddMaterialFromMask(mats[0], assets.Images["rockMask"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromMask(mats[1], assets.Images["softMask"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromMask(mats[2], assets.Images["grassMask"], dualgrid.VarientMap{
+		3:  {17},
+		5:  {16},
+		10: {19},
+		12: {18},
+	}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromMask(mats[3], assets.Images["softMask"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := dg.AddMaterialFromTilemap(assets.Images["grassTilemap"], dualgrid.VarientMap{}); err != nil {
+		log.Fatal(err)
+	}
+
+	materialsColors = []color.Color{
 		color.RGBA{139, 155, 180, 255}, // Gray
 		color.RGBA{115, 62, 57, 255},   // Brown
 		color.RGBA{38, 92, 66, 255},    // Dark Green
 		color.RGBA{62, 137, 72, 255},   // Green
 		color.RGBA{254, 174, 52, 255},  // Orange
 	}
+	currentModeName = "Nature"
 
-	worldWidth  int
-	worldHeight int
-	cursorX     int
-	cursorY     int
-	cameraX     int
-	cameraY     int
-)
+	return dg
+}
 
-type Game struct {
-	DualGrid dualgrid.DualGrid
+func (g *Game) switchMode(mode Mode) {
+	currentMode = mode
+	selectedMaterial = 0
+	switch mode {
+	case ModeDungeon:
+		g.DualGrid = setupDungeonMode()
+	case ModeNature:
+		g.DualGrid = setupNatureMode()
+	}
+	// Reset camera to center
+	cameraX = -(worldWidth - ((g.DualGrid.GridWidth + 1) * g.DualGrid.TileSize)) / 2
+	cameraY = -(worldHeight - ((g.DualGrid.GridHeight + 1) * g.DualGrid.TileSize)) / 2
+	updateDualGridImage = true
 }
 
 func (g *Game) Update() error {
@@ -76,6 +169,11 @@ func (g *Game) Update() error {
 		updateDualGridImage = true
 	}
 
+	// Switch mode
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
+		g.switchMode((currentMode + 1) % 2)
+	}
+
 	// Select Material
 	if _, y := ebiten.Wheel(); y != 0 {
 		if y > 0 {
@@ -87,10 +185,10 @@ func (g *Game) Update() error {
 			}
 		}
 	}
-
-	if updateDualGridImage {
-		updateDualGridImage = false
-		g.DualGrid.DrawTo(dualGridImage, cameraX, cameraY)
+	for i, key := range []ebiten.Key{ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4, ebiten.Key5, ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9} {
+		if i < len(g.DualGrid.Materials) && inpututil.IsKeyJustPressed(key) {
+			selectedMaterial = i
+		}
 	}
 
 	// Debug stuff
@@ -104,11 +202,44 @@ func (g *Game) Update() error {
 		showTextures = !showTextures
 	}
 
+	// Save
+	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		filename := "assets/" + currentModeName + ".bin"
+		if err := os.WriteFile(filename, g.DualGrid.WorldGrid.Marshal(), 0644); err != nil {
+			log.Println("save failed:", err)
+		} else {
+			log.Println("grid saved to", filename)
+		}
+	}
+
+	// Load
+	if inpututil.IsKeyJustPressed(ebiten.KeyL) {
+		filename := "assets/" + currentModeName + ".bin"
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			log.Println("load failed:", err)
+		} else {
+			grid, err := dualgrid.Unmarshal(data)
+			if err != nil {
+				log.Println("load failed:", err)
+			} else {
+				g.DualGrid.WorldGrid = grid
+				updateDualGridImage = true
+				log.Println("grid loaded from", filename)
+			}
+		}
+	}
+
+	if updateDualGridImage {
+		updateDualGridImage = false
+		g.DualGrid.DrawTo(dualGridImage, cameraX, cameraY)
+	}
+
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	screen.Clear()
+	screen.Fill(color.RGBA{24, 20, 37, 255})
 	screen.DrawImage(dualGridImage, &ebiten.DrawImageOptions{})
 
 	// Debug Draw
@@ -184,6 +315,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	opts := &ebiten.DrawImageOptions{}
 	opts.GeoM.Translate(1, float64(yPos))
 	screen.DrawImage(g.DualGrid.Materials[selectedMaterial].Texture.SubImage(image.Rect(15*g.DualGrid.TileSize, 0, 15*g.DualGrid.TileSize+g.DualGrid.TileSize, g.DualGrid.TileSize)).(*ebiten.Image), opts)
+
+	// Mode indicator (bottom right)
+	modeText := "Mode: " + currentModeName + " [Tab]"
+	ebitenutil.DebugPrintAt(screen, modeText, screen.Bounds().Dx()-len(modeText)*6-8, screen.Bounds().Dy()-12-8)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -191,97 +326,24 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	grassTilemap, _, err := ebitenutil.NewImageFromFile("assets/grassTilemap.png")
-	if err != nil {
-		log.Fatal(err)
-	}
-	softMask, _, err := ebitenutil.NewImageFromFile("assets/softMask.png")
-	if err != nil {
-		log.Fatal(err)
-	}
-	rockMask, _, err := ebitenutil.NewImageFromFile("assets/rockMask.png")
-	if err != nil {
-		log.Fatal(err)
-	}
-	grassMask, _, err := ebitenutil.NewImageFromFile("assets/grassMask.png")
-	if err != nil {
-		log.Fatal(err)
-	}
-	materialTypes, _, err := ebitenutil.NewImageFromFile("assets/materialTypes.png")
-	if err != nil {
-		log.Fatal(err)
-	}
-	// stairsSprite, _, err := ebitenutil.NewImageFromFile("assets/stairs.png")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	tileSize := 16
-
-	// Seperate materialTypes.png into a slice of individual texture
-	materials := []*ebiten.Image{}
-	materialsCount := int(materialTypes.Bounds().Dx() / tileSize)
-	for i := range materialsCount {
-		tempMaterial := materialTypes.SubImage(image.Rect(i*tileSize, 0, i*tileSize+tileSize, tileSize)).(*ebiten.Image)
-		materials = append(materials, tempMaterial)
-	}
-
-	newDualGrid := dualgrid.NewDualGrid(16, 16, tileSize, 3)
-
-	err = newDualGrid.AddMaterialFromMask(materials[0], rockMask, dualgrid.VarientMap{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = newDualGrid.AddMaterialFromMask(materials[1], rockMask, dualgrid.VarientMap{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = newDualGrid.AddMaterialFromMask(
-		materials[2],
-		grassMask,
-		dualgrid.VarientMap{
-			3:  {17},
-			5:  {16},
-			10: {19},
-			12: {18},
-		},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = newDualGrid.AddMaterialFromMask(materials[3], softMask, dualgrid.VarientMap{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = newDualGrid.AddMaterialFromTilemap(grassTilemap, dualgrid.VarientMap{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	// err = newDualGrid.AddMaterialFromTilemap(stairsSprite, dualgrid.VarientMap{})
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	game := &Game{
-		DualGrid: newDualGrid,
-	}
-
-	worldWidth = 30 * newDualGrid.TileSize
-	worldHeight = 20 * newDualGrid.TileSize
-
-	// Center Camera on grid center
-	cameraX = -(worldWidth - ((newDualGrid.GridWidth + 1) * newDualGrid.TileSize)) / 2
-	cameraY = -(worldHeight - ((newDualGrid.GridHeight + 1) * newDualGrid.TileSize)) / 2
-
+	game := &Game{}
 	dualGridImage = ebiten.NewImage(worldWidth, worldHeight)
 
+	game.switchMode(ModeDungeon)
+
 	fmt.Print("EbitenDualGrid Info:\n",
-		"  MouseWheel scrolls trough available materials\n",
-		"  Left/Right Click Destroy and place the selected material\n",
-		"  Middle mouse to pan around\n",
-		"  \"R\" reset the grid with the selected material as the default\n",
-		"  \"G\" Display the grid\n",
-		"  \"C\" Display the grid true values\n",
-		"  \"M\" Display the computed materials\n",
+		"  Tab              Switch between Dungeon and Nature mode\n",
+		"  1-9              Select material by number\n",
+		"  MouseWheel       Scroll through available materials\n",
+		"  Left Click       Place selected material\n",
+		"  Right Click      Erase (place default material)\n",
+		"  Middle Mouse     Pan around\n",
+		"  R                Reset grid with selected material as default\n",
+		"  S                Save grid to grid.bin\n",
+		"  L                Load grid from grid.bin\n",
+		"  G                Display the grid\n",
+		"  C                Display the grid true values\n",
+		"  M                Display the computed materials\n",
 	)
 
 	ebiten.SetWindowSize(worldWidth*2, worldHeight*2)

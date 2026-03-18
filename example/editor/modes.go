@@ -51,8 +51,8 @@ func (DungeonMode) Setup() dualgrid.DualGrid {
 	dg.AddMaterial(topWallMat)
 
 	materialsColors = []color.Color{
-		color.RGBA{255, 255, 255, 255}, // White
 		color.RGBA{139, 155, 180, 255}, // Gray
+		color.RGBA{115, 62, 57, 255},   // Brown
 		color.RGBA{254, 174, 52, 255},  // Orange
 	}
 	return dg

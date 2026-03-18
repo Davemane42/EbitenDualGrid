@@ -8,20 +8,19 @@ import (
 )
 
 type Camera struct {
-	X, Y         int
-	Zoom         float64
-	dragX, dragY int
-	Draging      bool
+	X, Y          float64
+	Scale         float64
+	Width, Height int
+	dragX, dragY  int
+	Draging       bool
 }
 
-func NewCamera() Camera {
-	return Camera{Zoom: 1.0}
-}
-
-// CenterOn sets the camera offset to center a world of size (gridW, gridH) on screen.
-func (c *Camera) CenterOn(screenW, screenH, gridW, gridH int) {
-	c.X = -(screenW - gridW) / 2
-	c.Y = -(screenH - gridH) / 2
+func NewCamera(Scale float64, Width, Height int) Camera {
+	return Camera{
+		Scale:  Scale,
+		Width:  Width,
+		Height: Height,
+	}
 }
 
 func (c *Camera) Update() {
@@ -34,54 +33,58 @@ func (c *Camera) Update() {
 		if newX == c.dragX && newY == c.dragY {
 			c.Draging = false
 		} else {
-			c.X -= int(float64(newX-c.dragX) / c.Zoom)
-			c.Y -= int(float64(newY-c.dragY) / c.Zoom)
+			c.X -= float64(newX - c.dragX)
+			c.Y -= float64(newY - c.dragY)
 			c.dragX, c.dragY = newX, newY
 			c.Draging = true
 		}
 	}
 
-	// Zoom
+	// Scale
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
-		c.ZoomBy(1)
+		c.SetScale(math.Min(c.Scale+1, 4))
 		updateDualGridImage = true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
-		c.ZoomBy(-1)
+		c.SetScale(math.Max(c.Scale-1, 1))
 		updateDualGridImage = true
 	}
 }
 
-// ZoomBy adjusts the zoom level by delta, rounded to the nearest integer and clamped to [1, 4].
-func (c *Camera) ZoomBy(delta float64) {
-	c.Zoom = math.Round(c.Zoom + delta)
-	if c.Zoom < 1 {
-		c.Zoom = 1
-	}
-	if c.Zoom > 4 {
-		c.Zoom = 4
-	}
+func (c *Camera) LookAt(worldX, worldY float64) {
+	c.X = worldX * c.Scale
+	c.Y = worldY * c.Scale
+}
+
+func (c *Camera) SetScale(newScale float64) {
+	worldX, worldY := c.X/c.Scale, c.Y/c.Scale
+	c.Scale = newScale
+	c.X = worldX * c.Scale
+	c.Y = worldY * c.Scale
 }
 
 // ScreenToWorld converts a screen pixel to a world pixel coordinate.
-func (c *Camera) ScreenToWorld(sx, sy, screenW, screenH int) (int, int) {
-	wx := int((float64(sx)-float64(screenW)/2)/c.Zoom+float64(screenW)/2) + c.X
-	wy := int((float64(sy)-float64(screenH)/2)/c.Zoom+float64(screenH)/2) + c.Y
-	return wx, wy
+func (c Camera) ScreenToWorld(screenX, screenY int) (worldX, worldY float64) {
+	worldX = (float64(screenX-c.Width/2) + c.X) / c.Scale
+	worldY = (float64(screenY-c.Height/2) + c.Y) / c.Scale
+
+	return worldX, worldY
 }
 
 // WorldToScreen converts a world pixel to a screen pixel coordinate.
-func (c *Camera) WorldToScreen(wx, wy, screenW, screenH int) (float32, float32) {
-	sx := (float64(wx-c.X)-float64(screenW)/2)*c.Zoom + float64(screenW)/2
-	sy := (float64(wy-c.Y)-float64(screenH)/2)*c.Zoom + float64(screenH)/2
-	return float32(sx), float32(sy)
+func (c Camera) WorldToScreen(worldX, worldY float64) (screenX, screenY int) {
+	screenX = int((worldX-c.X/c.Scale)*c.Scale + float64(c.Width/2))
+	screenY = int((worldY-c.Y/c.Scale)*c.Scale + float64(c.Height/2))
+
+	return screenX, screenY
 }
 
-// DrawImageOpts returns DrawImageOptions to render the world image to screen zoomed about the screen center.
-func (c *Camera) DrawImageOpts(screenW, screenH int) *ebiten.DrawImageOptions {
-	opts := &ebiten.DrawImageOptions{}
-	opts.GeoM.Translate(-float64(screenW)/2, -float64(screenH)/2)
-	opts.GeoM.Scale(c.Zoom, c.Zoom)
-	opts.GeoM.Translate(float64(screenW)/2, float64(screenH)/2)
-	return opts
+func (c Camera) ApplyTransforms(opts *ebiten.DrawImageOptions, worldX, worldY float64) {
+	opts.GeoM.Translate(worldX-c.X/c.Scale, worldY-c.Y/c.Scale)
+	opts.GeoM.Scale(c.Scale, c.Scale)
+	opts.GeoM.Translate(float64(c.Width)/2, float64(c.Height)/2)
+}
+
+func (c Camera) GetCursorWorldCoords() (float64, float64) {
+	return c.ScreenToWorld(ebiten.CursorPosition())
 }

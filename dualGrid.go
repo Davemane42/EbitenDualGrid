@@ -46,12 +46,31 @@ func (dg *DualGrid) MarkDirty() {
 	dg.dirty = true
 }
 
-// Canvas returns the cached rendered image, rebuilding it if the grid is dirty.
+// Canvas returns the cached full-grid rendered image, rebuilding it if dirty.
 func (dg *DualGrid) Canvas() *ebiten.Image {
+	w, h := dg.WorldGrid.Width, dg.WorldGrid.Height
+	fullW := (w + 1) * dg.TileSize
+	fullH := (h + 1) * dg.TileSize
+	if dg.canvas == nil || dg.canvas.Bounds().Dx() != fullW || dg.canvas.Bounds().Dy() != fullH {
+		dg.canvas = ebiten.NewImage(fullW, fullH)
+		dg.dirty = true
+	}
 	if dg.dirty {
 		dg.dirty = false
 		dg.DrawTo(dg.canvas, 0, 0)
 	}
+	return dg.canvas
+}
+
+// ViewCanvas renders only the visible world region (viewW×viewH world pixels starting at
+// worldLeft,worldTop) into the internal canvas, resizing it if needed.
+// The returned image should be drawn to screen using TileOffset() to correct alignment.
+// Unlike Canvas(), this always redraws — use it when the viewport moves every frame.
+func (dg *DualGrid) ViewCanvas(viewW, viewH, worldLeft, worldTop int) *ebiten.Image {
+	if dg.canvas == nil || dg.canvas.Bounds().Dx() != viewW || dg.canvas.Bounds().Dy() != viewH {
+		dg.canvas = ebiten.NewImage(viewW, viewH)
+	}
+	dg.DrawTo(dg.canvas, worldLeft, worldTop)
 	return dg.canvas
 }
 
@@ -83,7 +102,10 @@ func (dg DualGrid) Marshal() []byte {
 
 // Unmarshal loads a DualGrid state from bytes produced by Marshal.
 // Returns an error if the encoded metadata does not match the current DualGrid configuration.
-func (dg *DualGrid) Unmarshal(data []byte) error {
+//
+// If forceResize is true, a grid size mismatch is not an error: the WorldGrid and
+// internal canvas are resized to match the saved dimensions instead.
+func (dg *DualGrid) Unmarshal(data []byte, forceResize bool) error {
 	if len(data) < 14 {
 		return errors.New("data too short")
 	}
@@ -100,7 +122,11 @@ func (dg *DualGrid) Unmarshal(data []byte) error {
 		return fmt.Errorf("material count mismatch: file has %d, current is %d", numMaterials, len(dg.Materials))
 	}
 	if width != dg.WorldGrid.Width || height != dg.WorldGrid.Height {
-		return fmt.Errorf("grid size mismatch: file has %dx%d, current is %dx%d", width, height, dg.WorldGrid.Width, dg.WorldGrid.Height)
+		if !forceResize {
+			return fmt.Errorf("grid size mismatch: file has %dx%d, current is %dx%d", width, height, dg.WorldGrid.Width, dg.WorldGrid.Height)
+		}
+		dg.WorldGrid = NewGridWithValue(width, height, defaultMaterial)
+		dg.canvas = ebiten.NewImage((width+1)*dg.TileSize, (height+1)*dg.TileSize)
 	}
 	if len(data) < 14+width*height {
 		return errors.New("data truncated")

@@ -33,15 +33,15 @@ func (DungeonMode) Setup() dualgrid.DualGrid {
 	dg.WorldGrid.FillRect(2, 6, 2, 1, 1)  // horizontal corridor left wall
 	dg.WorldGrid.FillRect(12, 6, 2, 1, 1) // horizontal corridor right wall
 
-	floorMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["floor"], dualgrid.VarientMap{})
+	floorMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["floor"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	wallMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["wall"], dualgrid.VarientMap{})
+	wallMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["wall"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	topWallMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["topWall"], dualgrid.VarientMap{})
+	topWallMat, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["topWall"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -72,11 +72,11 @@ func (NatureMode) Setup() dualgrid.DualGrid {
 
 	dg := dualgrid.NewDualGrid(16, 16, tileSize, 3)
 
-	rockMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[0], assets.Images["rockMask"], dualgrid.VarientMap{})
+	rockMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[0], assets.Images["rockMask"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	dirtMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[1], assets.Images["rockMask"], dualgrid.VarientMap{})
+	dirtMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[1], assets.Images["rockMask"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,11 +89,11 @@ func (NatureMode) Setup() dualgrid.DualGrid {
 	if err != nil {
 		log.Fatal(err)
 	}
-	grassMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[3], assets.Images["softMask"], dualgrid.VarientMap{})
+	grassMat, err := dualgrid.NewMaterialFromMask(tileSize, mats[3], assets.Images["softMask"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	greenGrass, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["grassTilemap"], dualgrid.VarientMap{})
+	greenGrass, err := dualgrid.NewMaterialFromTilemap(tileSize, assets.Images["grassTilemap"], nil)
 	if err != nil {
 		log.Fatal(err)
 	}

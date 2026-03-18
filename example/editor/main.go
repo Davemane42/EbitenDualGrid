@@ -125,7 +125,7 @@ func (g *Game) Update() error {
 		data, err := os.ReadFile(filename)
 		if err != nil {
 			log.Println("load failed:", err)
-		} else if err := g.DualGrid.Unmarshal(data); err != nil {
+		} else if err := g.DualGrid.Unmarshal(data, false); err != nil {
 			log.Println("load failed:", err)
 		} else {
 			log.Println("grid loaded from", filename)

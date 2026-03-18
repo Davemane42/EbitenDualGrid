@@ -21,9 +21,6 @@ var (
 	showGrid     bool
 	showTextures bool
 
-	updateDualGridImage = true
-	dualGridImage       *ebiten.Image
-
 	selectedMaterial int
 	materialsColors  []color.Color
 
@@ -54,32 +51,27 @@ func (g *Game) switchMode(mode Mode) {
 	gridH := (g.DualGrid.WorldGrid.Height + 1) * g.DualGrid.TileSize
 
 	g.Camera.LookAt(float64(gridW/2), float64(gridH/2))
-	updateDualGridImage = true
 }
 
 func (g *Game) Update() error {
-	wx, wy := g.Camera.GetCursorWorldCoords()
-	MouseWorldX := (int(wx) - g.DualGrid.TileSize/2) / g.DualGrid.TileSize
-	MouseWorldY := (int(wy) - g.DualGrid.TileSize/2) / g.DualGrid.TileSize
-
 	g.Camera.Update()
-	if g.Camera.Draging {
-		updateDualGridImage = true
-	}
+	wx, wy := g.Camera.GetCursorWorldCoords()
+	tmx := (int(wx) - g.DualGrid.TileSize/2) / g.DualGrid.TileSize
+	tmy := (int(wy) - g.DualGrid.TileSize/2) / g.DualGrid.TileSize
 
 	// Place and destroy Material
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.DualGrid.IsInbound(MouseWorldX, MouseWorldY) {
-		g.DualGrid.WorldGrid.Cells[MouseWorldX][MouseWorldY] = dualgrid.TileType(selectedMaterial)
-		updateDualGridImage = true
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.DualGrid.IsInbound(tmx, tmy) {
+		g.DualGrid.WorldGrid.Cells[tmx][tmy] = dualgrid.TileType(selectedMaterial)
+		g.DualGrid.RedrawCanvasRegion(tmx, tmy, 1, 1)
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) && g.DualGrid.IsInbound(MouseWorldX, MouseWorldY) {
-		g.DualGrid.WorldGrid.Cells[MouseWorldX][MouseWorldY] = g.DualGrid.DefaultMaterial
-		updateDualGridImage = true
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) && g.DualGrid.IsInbound(tmx, tmy) {
+		g.DualGrid.WorldGrid.Cells[tmx][tmy] = g.DualGrid.DefaultMaterial
+		g.DualGrid.RedrawCanvasRegion(tmx, tmy, 1, 1)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		g.DualGrid.DefaultMaterial = dualgrid.TileType(selectedMaterial)
 		g.DualGrid.WorldGrid = dualgrid.NewGridWithValue(g.DualGrid.WorldGrid.Width, g.DualGrid.WorldGrid.Height, g.DualGrid.DefaultMaterial)
-		updateDualGridImage = true
+		g.DualGrid.MarkDirty()
 	}
 
 	// Switch mode
@@ -119,7 +111,7 @@ func (g *Game) Update() error {
 	// Save
 	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
 		filename := filepath.Join(sourceDir, currentMode.GetName()+".bin")
-		data := g.DualGrid.WorldGrid.Marshal()
+		data := g.DualGrid.Marshal()
 		if err := os.WriteFile(filename, data, 0644); err != nil {
 			log.Println("save failed:", err)
 		} else {
@@ -133,21 +125,11 @@ func (g *Game) Update() error {
 		data, err := os.ReadFile(filename)
 		if err != nil {
 			log.Println("load failed:", err)
+		} else if err := g.DualGrid.Unmarshal(data); err != nil {
+			log.Println("load failed:", err)
 		} else {
-			grid, err := dualgrid.Unmarshal(data)
-			if err != nil {
-				log.Println("load failed:", err)
-			} else {
-				g.DualGrid.WorldGrid = grid
-				updateDualGridImage = true
-				log.Println("grid loaded from", filename)
-			}
+			log.Println("grid loaded from", filename)
 		}
-	}
-
-	if updateDualGridImage {
-		updateDualGridImage = false
-		g.DualGrid.DrawTo(dualGridImage, 0, 0)
 	}
 
 	return nil
@@ -157,7 +139,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{24, 20, 37, 255})
 	opts := &ebiten.DrawImageOptions{}
 	g.Camera.ApplyTransforms(opts, 0, 0)
-	screen.DrawImage(dualGridImage, opts)
+	screen.DrawImage(g.DualGrid.Canvas(), opts)
 
 	// Debug Draw
 	if showGrid || showCorners {
@@ -179,7 +161,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 						screen,
 						float32(sx)+1, float32(sy)+1,
 						scaledTile-1, scaledTile-1,
-						1*float32(g.Camera.Scale),
+						1,
 						materialsColors[g.DualGrid.WorldGrid.Cells[x][y]],
 						false,
 					)
@@ -204,10 +186,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 						br = g.DualGrid.WorldGrid.Cells[x][y]
 					}
 
-					vector.DrawFilledCircle(screen, float32(sx)-co, float32(sy)-co, 1*float32(g.Camera.Scale), materialsColors[tl], false)
-					vector.DrawFilledCircle(screen, float32(sx)+co, float32(sy)-co, 1*float32(g.Camera.Scale), materialsColors[tr], false)
-					vector.DrawFilledCircle(screen, float32(sx)-co, float32(sy)+co, 1*float32(g.Camera.Scale), materialsColors[bl], false)
-					vector.DrawFilledCircle(screen, float32(sx)+co, float32(sy)+co, 1*float32(g.Camera.Scale), materialsColors[br], false)
+					vector.DrawFilledCircle(screen, float32(sx)-co, float32(sy)-co, 1, materialsColors[tl], false)
+					vector.DrawFilledCircle(screen, float32(sx)+co, float32(sy)-co, 1, materialsColors[tr], false)
+					vector.DrawFilledCircle(screen, float32(sx)-co, float32(sy)+co, 1, materialsColors[bl], false)
+					vector.DrawFilledCircle(screen, float32(sx)+co, float32(sy)+co, 1, materialsColors[br], false)
 				}
 			}
 		}
@@ -261,8 +243,6 @@ func main() {
 	worldHeight := 20 * tileSize
 
 	game := &Game{Camera: NewCamera(2.0, worldWidth, worldHeight)}
-	dualGridImage = ebiten.NewImage(worldWidth, worldHeight)
-
 	game.switchMode(modes[0])
 
 	fmt.Print("EbitenDualGrid Info:\n",

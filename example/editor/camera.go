@@ -43,11 +43,9 @@ func (c *Camera) Update() {
 	// Scale
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
 		c.SetScale(math.Min(c.Scale+1, 4))
-		updateDualGridImage = true
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
 		c.SetScale(math.Max(c.Scale-1, 1))
-		updateDualGridImage = true
 	}
 }
 

@@ -1,6 +1,11 @@
 package dualgrid
 
 import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"image"
+
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -14,6 +19,8 @@ type DualGrid struct {
 	DefaultMaterial TileType
 	WorldGrid       Grid
 	Materials       []Material
+	canvas          *ebiten.Image
+	dirty           bool
 }
 
 func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid {
@@ -22,7 +29,30 @@ func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid
 		DefaultMaterial: defaultMaterial,
 		TileSize:        tileSize,
 		WorldGrid:       NewGridWithValue(width, height, defaultMaterial),
+		canvas:          ebiten.NewImage((width+1)*tileSize, (height+1)*tileSize),
+		dirty:           true,
 	}
+}
+
+// SetCell updates a single cell and marks the canvas dirty.
+func (dg *DualGrid) SetCell(x, y int, t TileType) {
+	dg.WorldGrid.Cells[x][y] = t
+	dg.dirty = true
+}
+
+// MarkDirty schedules a full canvas redraw on the next Canvas() call.
+// Call this after bulk modifications to WorldGrid.
+func (dg *DualGrid) MarkDirty() {
+	dg.dirty = true
+}
+
+// Canvas returns the cached rendered image, rebuilding it if the grid is dirty.
+func (dg *DualGrid) Canvas() *ebiten.Image {
+	if dg.dirty {
+		dg.dirty = false
+		dg.DrawTo(dg.canvas, 0, 0)
+	}
+	return dg.canvas
 }
 
 // Check if a X, Y coord is inside the bounds of the grid
@@ -30,21 +60,106 @@ func (dg DualGrid) IsInbound(x, y int) bool {
 	return x >= 0 && y >= 0 && x < dg.WorldGrid.Width && y < dg.WorldGrid.Height
 }
 
+// Marshal encodes the DualGrid state to bytes.
+//
+//	Format: [tileSize uint32][defaultMaterial uint8][numMaterials uint8][width uint32][height uint32][tiles...]
+func (dg DualGrid) Marshal() []byte {
+	w, h := dg.WorldGrid.Width, dg.WorldGrid.Height
+	buf := make([]byte, 14+w*h)
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(dg.TileSize))
+	buf[4] = byte(dg.DefaultMaterial)
+	buf[5] = byte(len(dg.Materials))
+	binary.LittleEndian.PutUint32(buf[6:10], uint32(w))
+	binary.LittleEndian.PutUint32(buf[10:14], uint32(h))
+	i := 14
+	for x := range w {
+		for y := range h {
+			buf[i] = byte(dg.WorldGrid.Cells[x][y])
+			i++
+		}
+	}
+	return buf
+}
+
+// Unmarshal loads a DualGrid state from bytes produced by Marshal.
+// Returns an error if the encoded metadata does not match the current DualGrid configuration.
+func (dg *DualGrid) Unmarshal(data []byte) error {
+	if len(data) < 14 {
+		return errors.New("data too short")
+	}
+	tileSize := int(binary.LittleEndian.Uint32(data[0:4]))
+	defaultMaterial := TileType(data[4])
+	numMaterials := int(data[5])
+	width := int(binary.LittleEndian.Uint32(data[6:10]))
+	height := int(binary.LittleEndian.Uint32(data[10:14]))
+
+	if tileSize != dg.TileSize {
+		return fmt.Errorf("tile size mismatch: file has %d, current is %d", tileSize, dg.TileSize)
+	}
+	if numMaterials != len(dg.Materials) {
+		return fmt.Errorf("material count mismatch: file has %d, current is %d", numMaterials, len(dg.Materials))
+	}
+	if width != dg.WorldGrid.Width || height != dg.WorldGrid.Height {
+		return fmt.Errorf("grid size mismatch: file has %dx%d, current is %dx%d", width, height, dg.WorldGrid.Width, dg.WorldGrid.Height)
+	}
+	if len(data) < 14+width*height {
+		return errors.New("data truncated")
+	}
+	dg.DefaultMaterial = defaultMaterial
+	i := 14
+	for x := range width {
+		for y := range height {
+			dg.WorldGrid.Cells[x][y] = TileType(data[i])
+			i++
+		}
+	}
+	dg.dirty = true
+	return nil
+}
+
 // AddMaterial appends a Material to the DualGrid.
 func (dg *DualGrid) AddMaterial(m Material) {
 	dg.Materials = append(dg.Materials, m)
+	dg.dirty = true
 }
 
-// Render and draw the DualGrid to img from the top-left world coord
+// DrawTo clears img and renders the DualGrid into it from the given top-left world pixel coord.
 func (dg DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 	img.Clear()
+	dg.renderTo(img, left, top)
+}
 
-	widthInTile := img.Bounds().Dx() / dg.TileSize
-	heightInTile := img.Bounds().Dy() / dg.TileSize
+// RedrawCanvasRegion clears and redraws the tile region at (tileX, tileY) with
+// size (tileW x tileH) on the DualGrid's internal canvas.
+// Automatically expands by one tile on the right/bottom for dual-grid corner overlap.
+func (dg DualGrid) RedrawCanvasRegion(tileX, tileY, tileW, tileH int) {
+	left := tileX * dg.TileSize
+	top := tileY * dg.TileSize
+	right := (tileX + tileW + 1) * dg.TileSize
+	bottom := (tileY + tileH + 1) * dg.TileSize
+
+	b := dg.canvas.Bounds()
+	left = max(left, b.Min.X)
+	top = max(top, b.Min.Y)
+	right = min(right, b.Max.X)
+	bottom = min(bottom, b.Max.Y)
+	if left >= right || top >= bottom {
+		return
+	}
+	sub := dg.canvas.SubImage(image.Rect(left, top, right, bottom)).(*ebiten.Image)
+	dg.renderTo(sub, left, top)
+}
+
+func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
+	bounds := img.Bounds()
+	widthInTile := bounds.Dx() / dg.TileSize
+	heightInTile := bounds.Dy() / dg.TileSize
 	tileStartX := left / dg.TileSize
 	tileStartY := top / dg.TileSize
 	offsetX := float32(left % dg.TileSize)
 	offsetY := float32(top % dg.TileSize)
+	originX := float32(bounds.Min.X)
+	originY := float32(bounds.Min.Y)
 	ts := float32(dg.TileSize)
 
 	var tileX, tileY int
@@ -97,8 +212,8 @@ func (dg DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 			matTypeMask[bl] = true
 			matTypeMask[br] = true
 
-			dstX := float32(x)*ts - offsetX
-			dstY := float32(y)*ts - offsetY
+			dstX := float32(x)*ts - offsetX + originX
+			dstY := float32(y)*ts - offsetY + originY
 
 			// Draw up to 4 layers per tile for "layering"
 			for i := range len(dg.Materials) {

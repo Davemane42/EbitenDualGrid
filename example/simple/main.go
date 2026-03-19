@@ -90,11 +90,11 @@ func NewGame() *Game {
 			d := x - y
 			switch {
 			case d >= 1 && d <= 5:
-				dg.WorldGrid.Cells[x][y] = MatRock
+				dg.SetCell(x, y, MatRock)
 			case d >= -4 && d <= 10:
-				dg.WorldGrid.Cells[x][y] = MatDarkRock
+				dg.SetCell(x, y, MatDarkRock)
 			case d >= -9 && d <= 15:
-				dg.WorldGrid.Cells[x][y] = MatDarkGrass
+				dg.SetCell(x, y, MatDarkGrass)
 			}
 		}
 	}

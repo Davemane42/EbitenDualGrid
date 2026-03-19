@@ -25,7 +25,7 @@ type Material struct {
 	VarientMap VarientMap
 }
 
-// VarientMap maps a bitmask index to a list of alternate tile indices within
+// VarientMap maps a bitmask index (0–15) to a list of alternate tile indices within
 // the material's texture strip. Used to add visual variety to specific tile shapes.
 //
 //	bitmask is a 4bit number 0b0000 Top-Left, Top-Right, Bottom-Left and Bottom-Right
@@ -35,7 +35,7 @@ type Material struct {
 //		10: {19}, index 10 0b1010 -> slot 19
 //		12: {18}, index 12 0b1100 -> slot 18
 //	}
-type VarientMap map[int][]int
+type VarientMap [16][]int
 
 // NewMaterialFromTilemap takes a 4x4 tilemap and builds a Material.
 func NewMaterialFromTilemap(tileSize int, tilemapImage *ebiten.Image, varientMap VarientMap) (Material, error) {
@@ -70,6 +70,9 @@ func NewMaterialFromTilemap(tileSize int, tilemapImage *ebiten.Image, varientMap
 	}
 	var i = 16
 	for k, varient := range varientMap {
+		if len(varient) == 0 {
+			continue
+		}
 		// store the "default" tile as the first varient
 		m.VarientMap[k] = append(m.VarientMap[k], k)
 
@@ -129,5 +132,7 @@ func NewMaterialFromMask(tileSize int, textureImage, maskImage *ebiten.Image, va
 	}
 	tempImage.DrawImage(maskImage, multiplyOpts)
 
-	return NewMaterialFromTilemap(tileSize, tempImage, varientMap)
+	mat, err := NewMaterialFromTilemap(tileSize, tempImage, varientMap)
+	tempImage.Dispose()
+	return mat, err
 }

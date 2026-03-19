@@ -17,6 +17,9 @@ go run ./example/editor/.
 
 # Simple demo
 go run ./example/simple/.
+
+# Memory benchmark
+go run ./example/benchmark/.
 ```
 
 ## Installation
@@ -75,17 +78,17 @@ rockMat, err := dualgrid.NewMaterialFromMask(tileSize, rockTextureImage, rockMas
 
 > The `VarientMap` parameter lets you provide multiple visual variants for any bitmask index (0–15), adding visual diversity without manual tile placement. Variants are selected deterministically from world-space position so the same cell always shows the same variant.
 
+`VarientMap` is a fixed-size `[16][]int` array (one slot per 4-bit bitmask 0b0000 -> TL, TR, BL, BR) 
+
+Use index syntax in the literal:
 ```go
-//bitmask is a 4bit number 0b0000 Top-Left, Top-Right, Bottom-Left and Bottom-Right
-varientMap := dualgrid.VarientMap {
-    3:  {17}, //bitmask index 3 0b0011 has an extra variant an material "slot" 17
-    5:  {16}, //index 5  0b0101 -> slot 16
-    10: {19}, //index 10 0b1010 -> slot 19
-    12: {18}, //index 12 0b1100 -> slot 18
+varientMap := dualgrid.VarientMap{
+    3:  {17}, // bitmask index 3 0b0011 has an extra variant at material "slot" 17
+    12: {18}, // index 12 0b1100 -> slot 18
 }
 ```
 
-Pass `nil` to use no variants.
+Pass `dualgrid.VarientMap{}` (the zero value) for no variants.
 
 ---
 
@@ -99,27 +102,24 @@ dg.AddMaterial(rockMat)  // index 1 — rendered in front
 
 **5. Paint cells by setting their material**
 
-To update a cell and trigger a redraw:
+Use the `SetCell` / `GetCell` helpers:
 ```go
-// SetCell mark the internal Canvas as dirty and get redrawn next time dg.Canvas() is called
 dg.SetCell(x, y, dualgrid.TileType(materialIndex))
+tile := dg.GetCell(x, y)
 ```
 
-You can also write directly to the cell array:
+You can also write directly to the flat cell slice:
 ```go
-dg.WorldGrid.Cells[x][y] = dualgrid.TileType(materialIndex)
-dg.MarkDirty()
+dg.WorldGrid.Cells[x*dg.WorldGrid.Height+y] = dualgrid.TileType(materialIndex)
 ```
 
-Or with some grid helper functions
+The `Grid` also has shape functions for bulk operations:
 ```go
 // FillRect(x, y, w, h int, value TileType)
 dg.WorldGrid.FillRect(2, 2, 16, 11, 1)
 
 // OutlineRect(x, y, w, h int, value TileType)
 dg.WorldGrid.OutlineRect(0, 0, 20, 15, 1)
-
-dg.MarkDirty()
 ```
 
 ---
@@ -145,10 +145,10 @@ For incremental updates (e.g. painting one tile at a time), use `RedrawCanvasReg
 instead of marking the whole canvas dirty. It takes a tile position and size in **tile coordinates**:
 ```go
 // RedrawCanvasRegion(tileX, tileY, tileW, tileH int)
-dg.WorldGrid.Cells[tx][ty] = dualgrid.TileType(materialIndex)
+dg.SetCell(tx, ty, dualgrid.TileType(materialIndex))
 dg.RedrawCanvasRegion(tx, ty, 1, 1)
 ```
-The region is automatically expanded by one tile on each side to account for dual-grid overlap, so a 1×1 update redraws a 3×3 area of rendered tiles.
+The region is automatically expanded by one tile on each side to account for dual-grid overlap, so a 1x1 update redraws a 3x3 area of rendered tiles.
 
 ---
 
@@ -210,3 +210,13 @@ The WorldGrid and internal canvas are resized to match the saved dimensions:
 ```go
 err := dg.Unmarshal(data, true)
 ```
+
+## Grid internals
+
+The `Grid.Cells` slice is a **flat `[]TileType`** stored in column-major order. To access cell `(x, y)` directly:
+
+```go
+cell := dg.WorldGrid.Cells[x*dg.WorldGrid.Height+y]
+```
+
+Prefer using `SetCell`/`GetCell` on `DualGrid` instead.

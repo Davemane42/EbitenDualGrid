@@ -1,3 +1,4 @@
 /.claude
 /.vscode
 **/*.bin
+example/benchmark/*.txt

@@ -21,6 +21,9 @@ type DualGrid struct {
 	Materials       []Material
 	canvas          *ebiten.Image
 	dirty           bool
+	// Cached render buffers, reused across frames
+	vertices [][]ebiten.Vertex
+	indices  [][]uint16
 }
 
 func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid {
@@ -34,10 +37,14 @@ func NewDualGrid(width, height, tileSize int, defaultMaterial TileType) DualGrid
 	}
 }
 
-// SetCell updates a single cell and marks the canvas dirty.
+// SetCell updates a single cell.
 func (dg *DualGrid) SetCell(x, y int, t TileType) {
-	dg.WorldGrid.Cells[x][y] = t
-	dg.dirty = true
+	dg.WorldGrid.Cells[x*dg.WorldGrid.Height+y] = t
+}
+
+// GetCell returns the TileType at the given cell.
+func (dg *DualGrid) GetCell(x, y int) TileType {
+	return dg.WorldGrid.Cells[x*dg.WorldGrid.Height+y]
 }
 
 // MarkDirty schedules a full canvas redraw on the next Canvas() call.
@@ -52,6 +59,9 @@ func (dg *DualGrid) Canvas() *ebiten.Image {
 	fullW := (w + 1) * dg.TileSize
 	fullH := (h + 1) * dg.TileSize
 	if dg.canvas == nil || dg.canvas.Bounds().Dx() != fullW || dg.canvas.Bounds().Dy() != fullH {
+		if dg.canvas != nil {
+			dg.canvas.Deallocate()
+		}
 		dg.canvas = ebiten.NewImage(fullW, fullH)
 		dg.dirty = true
 	}
@@ -68,6 +78,9 @@ func (dg *DualGrid) Canvas() *ebiten.Image {
 // Unlike Canvas(), this always redraws — use it when the viewport moves every frame.
 func (dg *DualGrid) ViewCanvas(viewW, viewH, worldLeft, worldTop int) *ebiten.Image {
 	if dg.canvas == nil || dg.canvas.Bounds().Dx() != viewW || dg.canvas.Bounds().Dy() != viewH {
+		if dg.canvas != nil {
+			dg.canvas.Deallocate()
+		}
 		dg.canvas = ebiten.NewImage(viewW, viewH)
 	}
 	dg.DrawTo(dg.canvas, worldLeft, worldTop)
@@ -75,14 +88,14 @@ func (dg *DualGrid) ViewCanvas(viewW, viewH, worldLeft, worldTop int) *ebiten.Im
 }
 
 // Check if a X, Y coord is inside the bounds of the grid
-func (dg DualGrid) IsInbound(x, y int) bool {
+func (dg *DualGrid) IsInbound(x, y int) bool {
 	return x >= 0 && y >= 0 && x < dg.WorldGrid.Width && y < dg.WorldGrid.Height
 }
 
 // Marshal encodes the DualGrid state to bytes.
 //
 //	Format: [tileSize uint32][defaultMaterial uint8][numMaterials uint8][width uint32][height uint32][tiles...]
-func (dg DualGrid) Marshal() []byte {
+func (dg *DualGrid) Marshal() []byte {
 	w, h := dg.WorldGrid.Width, dg.WorldGrid.Height
 	buf := make([]byte, 14+w*h)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(dg.TileSize))
@@ -90,12 +103,8 @@ func (dg DualGrid) Marshal() []byte {
 	buf[5] = byte(len(dg.Materials))
 	binary.LittleEndian.PutUint32(buf[6:10], uint32(w))
 	binary.LittleEndian.PutUint32(buf[10:14], uint32(h))
-	i := 14
-	for x := range w {
-		for y := range h {
-			buf[i] = byte(dg.WorldGrid.Cells[x][y])
-			i++
-		}
+	for i, v := range dg.WorldGrid.Cells {
+		buf[14+i] = byte(v)
 	}
 	return buf
 }
@@ -126,18 +135,17 @@ func (dg *DualGrid) Unmarshal(data []byte, forceResize bool) error {
 			return fmt.Errorf("grid size mismatch: file has %dx%d, current is %dx%d", width, height, dg.WorldGrid.Width, dg.WorldGrid.Height)
 		}
 		dg.WorldGrid = NewGridWithValue(width, height, defaultMaterial)
+		if dg.canvas != nil {
+			dg.canvas.Deallocate()
+		}
 		dg.canvas = ebiten.NewImage((width+1)*dg.TileSize, (height+1)*dg.TileSize)
 	}
 	if len(data) < 14+width*height {
 		return errors.New("data truncated")
 	}
 	dg.DefaultMaterial = defaultMaterial
-	i := 14
-	for x := range width {
-		for y := range height {
-			dg.WorldGrid.Cells[x][y] = TileType(data[i])
-			i++
-		}
+	for i, v := range data[14 : 14+width*height] {
+		dg.WorldGrid.Cells[i] = TileType(v)
 	}
 	dg.dirty = true
 	return nil
@@ -150,7 +158,7 @@ func (dg *DualGrid) AddMaterial(m Material) {
 }
 
 // DrawTo clears img and renders the DualGrid into it from the given top-left world pixel coord.
-func (dg DualGrid) DrawTo(img *ebiten.Image, left, top int) {
+func (dg *DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 	img.Clear()
 	dg.renderTo(img, left, top)
 }
@@ -158,7 +166,7 @@ func (dg DualGrid) DrawTo(img *ebiten.Image, left, top int) {
 // RedrawCanvasRegion clears and redraws the tile region at (tileX, tileY) with
 // size (tileW x tileH) on the DualGrid's internal canvas.
 // Automatically expands by one tile on the right/bottom for dual-grid corner overlap.
-func (dg DualGrid) RedrawCanvasRegion(tileX, tileY, tileW, tileH int) {
+func (dg *DualGrid) RedrawCanvasRegion(tileX, tileY, tileW, tileH int) {
 	left := tileX * dg.TileSize
 	top := tileY * dg.TileSize
 	right := (tileX + tileW + 1) * dg.TileSize
@@ -176,7 +184,7 @@ func (dg DualGrid) RedrawCanvasRegion(tileX, tileY, tileW, tileH int) {
 	dg.renderTo(sub, left, top)
 }
 
-func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
+func (dg *DualGrid) renderTo(img *ebiten.Image, left, top int) {
 	bounds := img.Bounds()
 	widthInTile := bounds.Dx() / dg.TileSize
 	heightInTile := bounds.Dy() / dg.TileSize
@@ -187,6 +195,9 @@ func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
 	originX := float32(bounds.Min.X)
 	originY := float32(bounds.Min.Y)
 	ts := float32(dg.TileSize)
+	gridW := dg.WorldGrid.Width
+	gridH := dg.WorldGrid.Height
+	cells := dg.WorldGrid.Cells
 
 	var tileX, tileY int
 	var tl, tr, bl, br TileType
@@ -194,23 +205,25 @@ func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
 	var matTypeMask [256]bool // TileType is uint8 so max 256 values, no heap alloc per call
 	var bitmask int
 
-	// One vertex/index buffer slice per material
-	capacity := widthInTile * heightInTile
-	vertices := make([][]ebiten.Vertex, len(dg.Materials))
-	indices := make([][]uint16, len(dg.Materials))
-	for i := range dg.Materials {
-		vertices[i] = make([]ebiten.Vertex, 0, capacity*4)
-		indices[i] = make([]uint16, 0, capacity*6)
+	// Reuse cached vertex/index buffers
+	numMats := len(dg.Materials)
+	if len(dg.vertices) < numMats {
+		dg.vertices = make([][]ebiten.Vertex, numMats)
+		dg.indices = make([][]uint16, numMats)
+	}
+	for i := range numMats {
+		dg.vertices[i] = dg.vertices[i][:0]
+		dg.indices[i] = dg.indices[i][:0]
 	}
 
 	for x := range widthInTile {
 		tileX = tileStartX + x
-		if tileX < 0 || tileX >= dg.WorldGrid.Width+1 {
+		if tileX < 0 || tileX >= gridW+1 {
 			continue
 		}
 		for y := range heightInTile {
 			tileY = tileStartY + y
-			if tileY < 0 || tileY >= dg.WorldGrid.Height+1 {
+			if tileY < 0 || tileY >= gridH+1 {
 				continue
 			}
 
@@ -221,16 +234,16 @@ func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
 
 			// If inbound set corners to grid value
 			if tileX >= 1 && tileY >= 1 {
-				tl = dg.WorldGrid.Cells[tileX-1][tileY-1]
+				tl = cells[(tileX-1)*gridH+(tileY-1)]
 			}
-			if tileX < dg.WorldGrid.Width && tileY >= 1 {
-				tr = dg.WorldGrid.Cells[tileX][tileY-1]
+			if tileX < gridW && tileY >= 1 {
+				tr = cells[tileX*gridH+(tileY-1)]
 			}
-			if tileX >= 1 && tileY < dg.WorldGrid.Height {
-				bl = dg.WorldGrid.Cells[tileX-1][tileY]
+			if tileX >= 1 && tileY < gridH {
+				bl = cells[(tileX-1)*gridH+tileY]
 			}
-			if tileX < dg.WorldGrid.Width && tileY < dg.WorldGrid.Height {
-				br = dg.WorldGrid.Cells[tileX][tileY]
+			if tileX < gridW && tileY < gridH {
+				br = cells[tileX*gridH+tileY]
 			}
 
 			matTypeMask[tl] = true
@@ -262,22 +275,22 @@ func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
 				}
 
 				// pick a varient using a world-space coords deterministic hash
-				if v, ok := dg.Materials[matType].VarientMap[bitmask]; ok {
+				if v := dg.Materials[matType].VarientMap[bitmask]; len(v) > 0 {
 					tileHash := uint32(tileX)*7919 + uint32(tileY)*6151
 					bitmask = v[tileHash%uint32(len(v))]
 				}
 
 				srcX := float32(bitmask) * ts
-				base := uint16(len(vertices[i]))
+				base := uint16(len(dg.vertices[i]))
 
 				// TL, TR, BL, BR
-				vertices[i] = append(vertices[i],
+				dg.vertices[i] = append(dg.vertices[i],
 					ebiten.Vertex{DstX: dstX, DstY: dstY, SrcX: srcX, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 					ebiten.Vertex{DstX: dstX + ts, DstY: dstY, SrcX: srcX + ts, SrcY: 0, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 					ebiten.Vertex{DstX: dstX, DstY: dstY + ts, SrcX: srcX, SrcY: ts, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 					ebiten.Vertex{DstX: dstX + ts, DstY: dstY + ts, SrcX: srcX + ts, SrcY: ts, ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1},
 				)
-				indices[i] = append(indices[i],
+				dg.indices[i] = append(dg.indices[i],
 					base, base+1, base+2,
 					base+1, base+3, base+2,
 				)
@@ -294,9 +307,9 @@ func (dg DualGrid) renderTo(img *ebiten.Image, left, top int) {
 	// One draw call per material
 	var drawOpts ebiten.DrawTrianglesOptions
 	for i, mat := range dg.Materials {
-		if len(vertices[i]) == 0 {
+		if len(dg.vertices[i]) == 0 {
 			continue
 		}
-		img.DrawTriangles(vertices[i], indices[i], mat.Texture, &drawOpts)
+		img.DrawTriangles(dg.vertices[i], dg.indices[i], mat.Texture, &drawOpts)
 	}
 }

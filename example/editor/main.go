@@ -61,11 +61,11 @@ func (g *Game) Update() error {
 
 	// Place and destroy Material
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.DualGrid.IsInbound(tmx, tmy) {
-		g.DualGrid.WorldGrid.Cells[tmx][tmy] = dualgrid.TileType(selectedMaterial)
+		g.DualGrid.SetCell(tmx, tmy, dualgrid.TileType(selectedMaterial))
 		g.DualGrid.RedrawCanvasRegion(tmx, tmy, 1, 1)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) && g.DualGrid.IsInbound(tmx, tmy) {
-		g.DualGrid.WorldGrid.Cells[tmx][tmy] = g.DualGrid.DefaultMaterial
+		g.DualGrid.SetCell(tmx, tmy, g.DualGrid.DefaultMaterial)
 		g.DualGrid.RedrawCanvasRegion(tmx, tmy, 1, 1)
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
@@ -162,7 +162,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 						float32(sx)+1, float32(sy)+1,
 						scaledTile-1, scaledTile-1,
 						1,
-						materialsColors[g.DualGrid.WorldGrid.Cells[x][y]],
+						materialsColors[g.DualGrid.GetCell(x, y)],
 						false,
 					)
 				}
@@ -174,16 +174,16 @@ func (g *Game) Draw(screen *ebiten.Image) {
 					br = g.DualGrid.DefaultMaterial
 
 					if x >= 1 && y >= 1 {
-						tl = g.DualGrid.WorldGrid.Cells[x-1][y-1]
+						tl = g.DualGrid.GetCell(x-1, y-1)
 					}
 					if x < g.DualGrid.WorldGrid.Width && y >= 1 {
-						tr = g.DualGrid.WorldGrid.Cells[x][y-1]
+						tr = g.DualGrid.GetCell(x, y-1)
 					}
 					if x >= 1 && y < g.DualGrid.WorldGrid.Height {
-						bl = g.DualGrid.WorldGrid.Cells[x-1][y]
+						bl = g.DualGrid.GetCell(x-1, y)
 					}
 					if x < g.DualGrid.WorldGrid.Width && y < g.DualGrid.WorldGrid.Height {
-						br = g.DualGrid.WorldGrid.Cells[x][y]
+						br = g.DualGrid.GetCell(x, y)
 					}
 
 					vector.DrawFilledCircle(screen, float32(sx)-co, float32(sy)-co, 1, materialsColors[tl], false)
